@@ -2237,8 +2237,8 @@
       tmpCtx.drawImage(video, 0, 0, 240, 180);
       tmpCtx.restore();
 
-      socket.emit('frame', { code: duetRoom, data: tmpCanvas.toDataURL('image/jpeg', 0.4) });
-    }, 150); // ~6 fps — good enough for preview, low bandwidth
+      socket.emit('frame', { code: duetRoom, data: tmpCanvas.toDataURL('image/jpeg', 0.25) });
+    }, 250); // ~4 fps — enough for preview, less bandwidth
   }
 
   // ─── Render partner's streamed frame ────────────────────────
@@ -2347,9 +2347,8 @@
 
         if (count === 0) {
           setTimeout(() => {
-            // Host captures its own frame
+            stopFrameStreaming(); // pause live preview during photo transfer
             duetSnapFrame();
-            // Tell guest to snap too
             socket.emit('fire', duetRoom);
           }, 400);
         } else {
@@ -2382,7 +2381,12 @@
       srcX = 0; srcY = (vh - srcH) / 2;
     }
 
-    const W = Math.round(srcW), H = Math.round(srcH);
+    // Cap at 640×480 for duet mode — keeps transfer fast without visible quality loss
+    const MAX_W = 640;
+    const scale = Math.min(1, MAX_W / srcW);
+    const W = Math.round(srcW * scale);
+    const H = Math.round(srcH * scale);
+
     canvas.width = W; canvas.height = H;
 
     const ctx = canvas.getContext('2d');
@@ -2393,7 +2397,7 @@
     applyFilterToCanvas(ctx, W, H);
     drawHeartsOnCanvas(ctx, W, H);
 
-    const dataURL  = canvas.toDataURL('image/jpeg', 0.88);
+    const dataURL  = canvas.toDataURL('image/jpeg', 0.72);
     const shotIdx  = duetShotsTaken;
     duetMyImages[shotIdx] = dataURL;
 
@@ -2433,6 +2437,7 @@
       setPip('duetMyReadyPip', false);
       setPip('duetPartnerReadyPip', false);
       setTimeout(() => {
+        startFrameStreaming(); // resume live preview between shots
         document.getElementById('duetShootBtn').disabled = false;
         document.getElementById('duetBoothHint').textContent = `photo ${duetShotsTaken + 1} of 4 — press when ready`;
       }, 700);
