@@ -1,0 +1,2623 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Candid Archive — Photobooth</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;1,400&family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Space+Mono:wght@400&display=swap" rel="stylesheet">
+<script src="/socket.io/socket.io.js"></script>
+<style>
+  :root {
+    --cream: #f5f0e8;
+    --warm-white: #faf7f2;
+    --ink: #1a1410;
+    --sepia: #8b6f5c;
+    --blush: #d4a59a;
+    --gold: #c9a84c;
+    --shadow: rgba(26,20,16,0.12);
+    --film: rgba(139,111,92,0.08);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--cream);
+    color: var(--ink);
+    font-family: 'Cormorant Garamond', serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Grain overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 9999;
+    opacity: 0.6;
+  }
+
+  /* Decorative corner marks */
+  .corner-mark {
+    position: fixed;
+    width: 40px;
+    height: 40px;
+    opacity: 0.3;
+  }
+  .corner-mark.tl { top: 20px; left: 20px; border-top: 1px solid var(--sepia); border-left: 1px solid var(--sepia); }
+  .corner-mark.tr { top: 20px; right: 20px; border-top: 1px solid var(--sepia); border-right: 1px solid var(--sepia); }
+  .corner-mark.bl { bottom: 20px; left: 20px; border-bottom: 1px solid var(--sepia); border-left: 1px solid var(--sepia); }
+  .corner-mark.br { bottom: 20px; right: 20px; border-bottom: 1px solid var(--sepia); border-right: 1px solid var(--sepia); }
+
+  /* SCREENS */
+  .screen {
+    display: none;
+    min-height: 100vh;
+    padding: 40px 20px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    animation: fadeUp 0.7s ease forwards;
+    position: relative;
+  }
+  .screen.active { display: flex; }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(18px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ===== LANDING ===== */
+  .landing-eyebrow {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--sepia);
+    margin-bottom: 28px;
+    opacity: 0.7;
+  }
+
+  .landing-title {
+    font-family: 'Playfair Display', serif;
+    font-size: clamp(52px, 10vw, 96px);
+    font-weight: 400;
+    line-height: 0.95;
+    text-align: center;
+    color: var(--ink);
+    margin-bottom: 8px;
+  }
+
+  .landing-title em {
+    font-style: italic;
+    color: var(--sepia);
+  }
+
+  .landing-subtitle {
+    font-size: 18px;
+    font-weight: 300;
+    font-style: italic;
+    color: var(--sepia);
+    text-align: center;
+    margin-bottom: 56px;
+    letter-spacing: 0.02em;
+  }
+
+  .film-strip-preview {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 56px;
+    opacity: 0.35;
+  }
+
+  .film-hole-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    justify-content: space-between;
+  }
+
+  .film-hole {
+    width: 8px;
+    height: 10px;
+    background: var(--ink);
+    border-radius: 1px;
+    opacity: 0.5;
+  }
+
+  .film-placeholder {
+    width: 70px;
+    height: 70px;
+    background: var(--ink);
+    border-radius: 2px;
+    opacity: 0.08;
+  }
+
+  .btn-primary {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 16px;
+    font-weight: 300;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--warm-white);
+    background: var(--ink);
+    border: none;
+    padding: 16px 48px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .btn-primary::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--gold);
+    transform: scaleX(0);
+    transition: transform 0.3s ease;
+  }
+
+  .btn-primary:hover {
+    background: #2d2520;
+    transform: translateY(-1px);
+    box-shadow: 0 8px 24px var(--shadow);
+  }
+  .btn-primary:hover::after { transform: scaleX(1); }
+
+  .landing-note {
+    margin-top: 24px;
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    color: var(--sepia);
+    opacity: 0.5;
+    text-transform: uppercase;
+  }
+
+  /* ===== CHOOSE FILTER ===== */
+  .section-title {
+    font-family: 'Playfair Display', serif;
+    font-size: clamp(32px, 6vw, 52px);
+    font-weight: 400;
+    text-align: center;
+    color: var(--ink);
+    margin-bottom: 8px;
+  }
+
+  .section-sub {
+    font-size: 16px;
+    font-style: italic;
+    color: var(--sepia);
+    text-align: center;
+    margin-bottom: 44px;
+    font-weight: 300;
+  }
+
+  .filter-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    max-width: 460px;
+    width: 100%;
+    margin-bottom: 40px;
+  }
+
+  .filter-card {
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.25s ease;
+    position: relative;
+    aspect-ratio: 1;
+    overflow: hidden;
+    background: #e0d8cc;
+  }
+
+  .filter-card .filter-thumb {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    font-style: italic;
+    color: var(--ink);
+    position: relative;
+  }
+
+  /* filter previews */
+  .filter-card[data-filter="none"] .filter-thumb { background: linear-gradient(135deg, #d4c9b8, #b8a99a); }
+  .filter-card[data-filter="warm"] .filter-thumb { background: linear-gradient(135deg, #e8c9a0, #c49a6c); }
+  .filter-card[data-filter="cool"] .filter-thumb { background: linear-gradient(135deg, #b8c8d8, #8a9fb5); }
+  .filter-card[data-filter="noir"] .filter-thumb { background: linear-gradient(135deg, #5a5a5a, #1a1a1a); color: #ccc; }
+  .filter-card[data-filter="blush"] .filter-thumb { background: linear-gradient(135deg, #f0a0b8, #e0607a); }
+  .filter-card[data-filter="golden"] .filter-thumb { background: linear-gradient(135deg, #e8980a, #7a3a00); }
+  .filter-card[data-filter="polaroid"] .filter-thumb { background: linear-gradient(135deg, #ede8d8, #d4c89a); }
+  .filter-card[data-filter="dreamy"]   .filter-thumb { background: linear-gradient(135deg, #f0e8f8, #d8c0f0); }
+  .filter-card[data-filter="nineties"] .filter-thumb { background: linear-gradient(135deg, #a8e060, #f04080); }
+  .filter-card[data-filter="lavender"] .filter-thumb { background: linear-gradient(135deg, #c8b8e8, #9878c8); }
+
+  .filter-card.selected {
+    border-color: var(--ink);
+    transform: scale(0.97);
+    box-shadow: inset 0 0 0 2px var(--ink);
+  }
+
+  .filter-label {
+    position: absolute;
+    bottom: 6px;
+    left: 0; right: 0;
+    text-align: center;
+    font-family: 'Space Mono', monospace;
+    font-size: 8px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--ink);
+    opacity: 0.7;
+  }
+
+  .filter-card[data-filter="noir"] .filter-label { color: #ccc; }
+
+  /* ===== BOOTH ===== */
+  .booth-wrap {
+    width: 100%;
+    max-width: 480px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+  }
+
+  .booth-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .shot-counter {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    color: var(--sepia);
+    text-transform: uppercase;
+  }
+
+  .shot-dots {
+    display: flex;
+    gap: 6px;
+  }
+
+  .shot-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: transparent;
+    border: 1px solid var(--sepia);
+    transition: all 0.4s ease;
+  }
+
+  .shot-dot.filled {
+    background: var(--ink);
+    border-color: var(--ink);
+    transform: scale(1.2);
+  }
+
+  .viewfinder {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 4/3;
+    overflow: hidden;
+    background: var(--ink);
+  }
+
+  /* Viewfinder corner marks */
+  .viewfinder::before,
+  .viewfinder::after {
+    content: '';
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    z-index: 10;
+    pointer-events: none;
+  }
+  .viewfinder::before { top: 12px; left: 12px; border-top: 1.5px solid rgba(255,255,255,0.5); border-left: 1.5px solid rgba(255,255,255,0.5); }
+  .viewfinder::after { top: 12px; right: 12px; border-top: 1.5px solid rgba(255,255,255,0.5); border-right: 1.5px solid rgba(255,255,255,0.5); }
+
+  .vf-bottom-left,
+  .vf-bottom-right {
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    z-index: 10;
+    pointer-events: none;
+  }
+  .vf-bottom-left { bottom: 12px; left: 12px; border-bottom: 1.5px solid rgba(255,255,255,0.5); border-left: 1.5px solid rgba(255,255,255,0.5); }
+  .vf-bottom-right { bottom: 12px; right: 12px; border-bottom: 1.5px solid rgba(255,255,255,0.5); border-right: 1.5px solid rgba(255,255,255,0.5); }
+
+  #video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    transform: scaleX(-1);
+  }
+
+  .filter-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 5;
+    mix-blend-mode: multiply;
+  }
+
+  .flash-overlay {
+    position: absolute;
+    inset: 0;
+    background: white;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 20;
+    transition: opacity 0.05s ease;
+  }
+
+  .flash-overlay.flash {
+    opacity: 1;
+    transition: opacity 0.4s ease;
+  }
+
+  .countdown-display {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 15;
+    pointer-events: none;
+  }
+
+  .countdown-number {
+    font-family: 'Playfair Display', serif;
+    font-size: 120px;
+    color: white;
+    opacity: 0;
+    text-shadow: 0 2px 20px rgba(0,0,0,0.5);
+    transform: scale(1.5);
+    transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  .countdown-number.show {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+
+  /* Thumbnails strip below viewfinder */
+  .thumbnails-row {
+    display: flex;
+    gap: 8px;
+    width: 100%;
+    justify-content: center;
+    min-height: 64px;
+    align-items: center;
+  }
+
+  .thumb-slot {
+    width: 72px;
+    height: 54px;
+    border: 1px solid #c8bfb4;
+    background: #e8e0d4;
+    overflow: hidden;
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  .thumb-slot img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    filter: var(--active-filter, none);
+  }
+
+  .thumb-slot.empty::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 4px,
+      rgba(139,111,92,0.08) 4px,
+      rgba(139,111,92,0.08) 8px
+    );
+  }
+
+  /* Shoot button */
+  .shoot-btn {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: var(--ink);
+    border: 3px solid var(--cream);
+    box-shadow: 0 0 0 1px var(--ink), 0 4px 16px var(--shadow);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .shoot-btn::after {
+    content: '';
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--warm-white);
+    opacity: 0.9;
+  }
+
+  .shoot-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 0 0 1px var(--ink), 0 8px 24px var(--shadow);
+  }
+
+  .shoot-btn:active { transform: scale(0.96); }
+  .shoot-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+  .booth-hint {
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    color: var(--sepia);
+    opacity: 0.6;
+    text-transform: uppercase;
+    text-align: center;
+  }
+
+  /* ===== STRIP PREVIEW ===== */
+  .strip-outer {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 32px;
+    max-width: 500px;
+    width: 100%;
+  }
+
+  .strip-container {
+    background: white;
+    padding: 16px 16px 32px;
+    box-shadow: 0 12px 48px var(--shadow), 0 2px 8px rgba(0,0,0,0.08);
+    position: relative;
+    transform: rotate(-0.5deg);
+    transition: transform 0.3s ease;
+  }
+
+  .strip-container:hover { transform: rotate(0deg) scale(1.01); }
+
+  .strip-images {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .strip-images img {
+    width: 240px;
+    height: 180px;
+    object-fit: cover;
+    display: block;
+  }
+
+  .strip-footer {
+    text-align: center;
+    margin-top: 12px;
+    font-family: 'Playfair Display', serif;
+    font-size: 13px;
+    font-style: italic;
+    color: #888;
+    letter-spacing: 0.05em;
+  }
+
+  .strip-date {
+    font-family: 'Space Mono', monospace;
+    font-size: 8px;
+    letter-spacing: 0.15em;
+    color: #bbb;
+    text-transform: uppercase;
+    margin-top: 2px;
+  }
+
+  .strip-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+  }
+
+  .btn-download {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 15px;
+    font-weight: 400;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--warm-white);
+    background: var(--ink);
+    border: none;
+    padding: 14px 44px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .btn-download:hover {
+    background: #2d2520;
+    transform: translateY(-1px);
+    box-shadow: 0 8px 24px var(--shadow);
+  }
+
+  .btn-retake {
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--sepia);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 8px 16px;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .btn-retake:hover { opacity: 1; }
+
+  /* Canvas (hidden) */
+  #captureCanvas { display: none; }
+
+  /* ===== DUET MODE ===== */
+  .duet-btn {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 15px;
+    font-weight: 300;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink);
+    background: transparent;
+    border: 1px solid var(--sepia);
+    padding: 13px 40px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    margin-top: 12px;
+    opacity: 0.8;
+  }
+  .duet-btn:hover { border-color: var(--ink); opacity: 1; background: rgba(26,20,16,0.04); }
+
+  .duet-lobby {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    max-width: 420px;
+    width: 100%;
+  }
+
+  .duet-eyebrow {
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--sepia);
+    opacity: 0.65;
+    margin-bottom: 32px;
+  }
+
+  .duet-options {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+    margin-bottom: 40px;
+  }
+
+  .duet-option-btn {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 17px;
+    font-weight: 300;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    padding: 18px 32px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    border: none;
+    text-align: left;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .duet-option-btn.create {
+    background: var(--ink);
+    color: var(--warm-white);
+  }
+  .duet-option-btn.create:hover { background: #2d2520; transform: translateY(-1px); box-shadow: 0 8px 24px var(--shadow); }
+
+  .duet-option-btn.join {
+    background: transparent;
+    color: var(--ink);
+    border: 1px solid #c8bfb4;
+  }
+  .duet-option-btn.join:hover { border-color: var(--ink); transform: translateY(-1px); }
+
+  .duet-option-icon {
+    font-size: 22px;
+    opacity: 0.85;
+  }
+
+  .duet-option-text small {
+    display: block;
+    font-family: 'Space Mono', monospace;
+    font-size: 8px;
+    letter-spacing: 0.15em;
+    opacity: 0.5;
+    margin-top: 3px;
+    text-transform: uppercase;
+  }
+
+  /* Join input */
+  .duet-join-wrap {
+    display: none;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+    animation: fadeUp 0.4s ease forwards;
+  }
+  .duet-join-wrap.visible { display: flex; }
+
+  .duet-code-input {
+    font-family: 'Space Mono', monospace;
+    font-size: 20px;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    text-align: center;
+    padding: 16px;
+    border: 1px solid #c8bfb4;
+    background: var(--warm-white);
+    color: var(--ink);
+    outline: none;
+    width: 100%;
+    transition: border-color 0.2s;
+  }
+  .duet-code-input:focus { border-color: var(--ink); }
+  .duet-code-input::placeholder { opacity: 0.3; font-size: 14px; letter-spacing: 0.1em; }
+
+  /* Room code display */
+  .duet-room-card {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    width: 100%;
+    padding: 28px 24px;
+    background: var(--warm-white);
+    border: 1px solid #e0d8cc;
+    animation: fadeUp 0.4s ease forwards;
+  }
+  .duet-room-card.visible { display: flex; }
+
+  .duet-room-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: var(--sepia);
+    opacity: 0.6;
+  }
+
+  .duet-room-code {
+    font-family: 'Space Mono', monospace;
+    font-size: 32px;
+    letter-spacing: 0.35em;
+    color: var(--ink);
+    font-weight: 400;
+    cursor: pointer;
+    transition: opacity 0.2s;
+    user-select: all;
+  }
+  .duet-room-code:hover { opacity: 0.6; }
+
+  .duet-copy-hint {
+    font-family: 'Space Mono', monospace;
+    font-size: 8px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--sepia);
+    opacity: 0.45;
+  }
+
+  /* Status area */
+  .duet-status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--sepia);
+    opacity: 0.7;
+    min-height: 28px;
+    margin-top: 8px;
+  }
+
+  .duet-status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--sepia);
+    opacity: 0.5;
+    flex-shrink: 0;
+  }
+  .duet-status-dot.connected { background: #6a9e6a; opacity: 1; animation: pulse-dot 2s ease infinite; }
+  .duet-status-dot.waiting { background: var(--gold); opacity: 1; animation: pulse-dot 1.4s ease infinite; }
+  .duet-status-dot.error { background: var(--blush); opacity: 1; }
+
+  @keyframes pulse-dot {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.5); opacity: 0.5; }
+  }
+
+  /* Duet booth — split viewfinder */
+  .duet-booth-wrap {
+    width: 100%;
+    max-width: 520px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .duet-viewfinders {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    width: 100%;
+  }
+
+  .duet-vf-slot {
+    position: relative;
+    aspect-ratio: 4/3;
+    background: var(--ink);
+    overflow: hidden;
+  }
+
+  .duet-vf-label {
+    position: absolute;
+    bottom: 8px;
+    left: 0; right: 0;
+    text-align: center;
+    font-family: 'Space Mono', monospace;
+    font-size: 8px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.5);
+    z-index: 10;
+    pointer-events: none;
+  }
+
+  .duet-remote-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 8px;
+    opacity: 0.3;
+    color: white;
+  }
+
+  .duet-remote-placeholder svg {
+    width: 32px;
+    height: 32px;
+    opacity: 0.6;
+  }
+
+  .duet-remote-placeholder span {
+    font-family: 'Space Mono', monospace;
+    font-size: 8px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+  }
+
+  .duet-remote-canvas {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .duet-thumbs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    width: 100%;
+  }
+
+  .duet-thumb-pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+  }
+
+  .duet-thumb-slot {
+    width: 100%;
+    aspect-ratio: 4/3;
+    border: 1px solid #c8bfb4;
+    background: #e8e0d4;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .duet-thumb-slot img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .duet-thumb-slot.empty::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(139,111,92,0.08) 4px, rgba(139,111,92,0.08) 8px);
+  }
+
+  /* Duet strip — side by side */
+  .duet-strip-images {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 3px;
+  }
+
+  .duet-strip-images .duet-col {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .duet-strip-images img {
+    width: 118px;
+    height: 88px;
+    object-fit: cover;
+    display: block;
+  }
+
+  .duet-strip-divider {
+    width: 1px;
+    background: rgba(139,111,92,0.2);
+    align-self: stretch;
+    margin: 0 1px;
+  }
+
+  /* Duet names on strip */
+  .duet-strip-names {
+    display: flex;
+    justify-content: space-between;
+    padding: 0 2px;
+    margin-top: 6px;
+  }
+
+  .duet-strip-names span {
+    font-family: 'Space Mono', monospace;
+    font-size: 7px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--sepia);
+    opacity: 0.55;
+  }
+
+  .duet-waiting-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(26,20,16,0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 30;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .duet-waiting-text {
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.7);
+    text-align: center;
+    padding: 0 24px;
+  }
+
+  .duet-spinner {
+    width: 24px;
+    height: 24px;
+    border: 2px solid rgba(255,255,255,0.2);
+    border-top-color: rgba(255,255,255,0.7);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Back button */
+  .btn-back {
+    position: absolute;
+    top: 28px;
+    left: 28px;
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--sepia);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    opacity: 0.55;
+    transition: opacity 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 0;
+  }
+  .btn-back::before {
+    content: '←';
+    font-size: 11px;
+  }
+  .btn-back:hover { opacity: 1; }
+
+  /* Camera error */
+  .cam-error {
+    background: #f0e8e0;
+    border: 1px solid #d4a59a;
+    padding: 16px 24px;
+    text-align: center;
+    font-size: 14px;
+    color: var(--sepia);
+    font-style: italic;
+    max-width: 320px;
+  }
+
+  /* filter CSS classes */
+  .filter-none { filter: none; }
+  .filter-warm { filter: sepia(0.3) saturate(1.2) brightness(1.05); }
+  .filter-cool { filter: saturate(0.8) hue-rotate(15deg) brightness(1.05); }
+  .filter-noir { filter: grayscale(1) contrast(1.1) brightness(0.95); }
+  .filter-blush { filter: sepia(0.15) saturate(1.3) hue-rotate(-10deg) brightness(1.08); }
+  .filter-golden { filter: sepia(0.4) saturate(1.5) brightness(1.1) hue-rotate(-5deg); }
+
+  /* Responsive */
+  @media (max-width: 480px) {
+    .filter-grid { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .strip-images img { width: 200px; height: 150px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Decorative corners -->
+<div class="corner-mark tl"></div>
+<div class="corner-mark tr"></div>
+<div class="corner-mark bl"></div>
+<div class="corner-mark br"></div>
+
+<!-- Hidden canvas for capturing -->
+<canvas id="captureCanvas"></canvas>
+
+<!-- ===== SCREEN 1: LANDING ===== -->
+<div class="screen active" id="screen-landing">
+  <div class="landing-eyebrow">a photobooth for everyone</div>
+  <h1 class="landing-title">The Candid<br><em>Archive</em></h1>
+  <p class="landing-subtitle">four frames, one memory</p>
+
+  <!-- Decorative film preview -->
+  <div class="film-strip-preview">
+    <div class="film-hole-row">
+      <div class="film-hole"></div><div class="film-hole"></div><div class="film-hole"></div><div class="film-hole"></div>
+    </div>
+    <div class="film-placeholder"></div>
+    <div class="film-placeholder"></div>
+    <div class="film-placeholder"></div>
+    <div class="film-placeholder"></div>
+    <div class="film-hole-row">
+      <div class="film-hole"></div><div class="film-hole"></div><div class="film-hole"></div><div class="film-hole"></div>
+    </div>
+  </div>
+
+  <button class="btn-primary" onclick="goTo('screen-filter')">step inside</button>
+  <button class="duet-btn" onclick="goTo('screen-duet-lobby')">✦ duet mode</button>
+  <p class="landing-note">camera required · 4 photos · instant strip</p>
+</div>
+
+<!-- ===== SCREEN 2: CHOOSE FILTER ===== -->
+<div class="screen" id="screen-filter">
+  <button class="btn-back" onclick="goTo('screen-landing')">back</button>
+  <p class="section-title">Choose<br><em>your mood</em></p>
+  <p class="section-sub">a filter sets the feeling</p>
+
+  <div class="filter-grid">
+    <div class="filter-card selected" data-filter="none" onclick="selectFilter(this)">
+      <div class="filter-thumb"></div>
+      <div class="filter-label">Natural</div>
+    </div>
+    <div class="filter-card" data-filter="warm" onclick="selectFilter(this)">
+      <div class="filter-thumb"></div>
+      <div class="filter-label">Warm</div>
+    </div>
+    <div class="filter-card" data-filter="cool" onclick="selectFilter(this)">
+      <div class="filter-thumb"></div>
+      <div class="filter-label">Cool</div>
+    </div>
+    <div class="filter-card" data-filter="noir" onclick="selectFilter(this)">
+      <div class="filter-thumb"></div>
+      <div class="filter-label">Noir</div>
+    </div>
+    <div class="filter-card" data-filter="blush" onclick="selectFilter(this)">
+      <div class="filter-thumb"></div>
+      <div class="filter-label">Blush</div>
+    </div>
+    <div class="filter-card" data-filter="golden" onclick="selectFilter(this)">
+      <div class="filter-thumb"></div>
+      <div class="filter-label">Golden</div>
+    </div>
+    <div class="filter-card" data-filter="polaroid" onclick="selectFilter(this)">
+      <div class="filter-thumb"></div>
+      <div class="filter-label">Polaroid</div>
+    </div>
+    <!--<div class="filter-card" data-filter="dreamy" onclick="selectFilter(this)">
+      <div class="filter-thumb"></div>
+      <div class="filter-label">Dreamy</div>
+    </div>-->
+    <div class="filter-card" data-filter="nineties" onclick="selectFilter(this)">
+      <div class="filter-thumb"></div>
+      <div class="filter-label">90s</div>
+    </div>
+    <div class="filter-card" data-filter="lavender" onclick="selectFilter(this)">
+      <div class="filter-thumb"></div>
+      <div class="filter-label">Lavender</div>
+    </div>
+  </div>
+
+  <button class="btn-primary" onclick="startBooth()">open the booth</button>
+</div>
+
+<!-- ===== SCREEN 3: BOOTH ===== -->
+<div class="screen" id="screen-booth">
+  <button class="btn-back" onclick="exitBooth()">back</button>
+  <div class="booth-wrap">
+    <div class="booth-header">
+      <div class="shot-counter">shot</div>
+      <div class="shot-dots">
+        <div class="shot-dot" id="dot-0"></div>
+        <div class="shot-dot" id="dot-1"></div>
+        <div class="shot-dot" id="dot-2"></div>
+        <div class="shot-dot" id="dot-3"></div>
+      </div>
+      <div class="shot-counter">of 4</div>
+    </div>
+
+    <div class="viewfinder">
+      <video id="video" autoplay playsinline muted></video>
+      <div class="filter-overlay" id="filterOverlay"></div>
+      <div class="flash-overlay" id="flashOverlay"></div>
+      <div class="countdown-display">
+        <div class="countdown-number" id="countdownNum"></div>
+      </div>
+      <div class="vf-bottom-left"></div>
+      <div class="vf-bottom-right"></div>
+    </div>
+
+    <div class="thumbnails-row" id="thumbsRow">
+      <div class="thumb-slot empty" id="thumb-0"></div>
+      <div class="thumb-slot empty" id="thumb-1"></div>
+      <div class="thumb-slot empty" id="thumb-2"></div>
+      <div class="thumb-slot empty" id="thumb-3"></div>
+    </div>
+
+    <button class="shoot-btn" id="shootBtn" onclick="startCountdown()"></button>
+    <p class="booth-hint" id="boothHint">press to capture</p>
+    <div id="camError" class="cam-error" style="display:none">
+      Camera unavailable — please allow access and try again.
+    </div>
+  </div>
+</div>
+
+<!-- ===== SCREEN 4: STRIP ===== -->
+<div class="screen" id="screen-strip">
+  <button class="btn-back" onclick="goTo('screen-filter')">back</button>
+  <div class="strip-outer">
+    <p class="section-title"><em>Your</em> strip</p>
+
+    <div class="strip-container" id="stripContainer">
+      <div class="strip-images" id="stripImages"></div>
+      <div class="strip-footer">the candid archive</div>
+      <div class="strip-date" id="stripDate"></div>
+    </div>
+
+    <div class="strip-actions">
+      <button class="btn-download" onclick="downloadStrip()">↓ save this memory</button>
+      <button class="btn-retake" onclick="retake()">take another</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SCREEN 5: DUET LOBBY ===== -->
+<div class="screen" id="screen-duet-lobby">
+  <button class="btn-back" onclick="leaveDuet()">back</button>
+  <div class="duet-lobby">
+    <div class="duet-eyebrow">duet mode · two devices · one strip</div>
+    <p class="section-title"><em>Together</em></p>
+    <p class="section-sub" style="margin-bottom:32px">share a frame across any distance</p>
+
+    <div class="duet-options" id="duetOptions">
+      <button class="duet-option-btn create" onclick="duetCreate()">
+        <span class="duet-option-icon">✦</span>
+        <span class="duet-option-text">
+          create a room
+          <small>get a code to share</small>
+        </span>
+      </button>
+      <button class="duet-option-btn join" onclick="showJoinInput()">
+        <span class="duet-option-icon">→</span>
+        <span class="duet-option-text">
+          join a room
+          <small>enter a friend's code</small>
+        </span>
+      </button>
+    </div>
+
+    <!-- Room code display (host) -->
+    <div class="duet-room-card" id="duetRoomCard">
+      <div class="duet-room-label">your room code</div>
+      <div class="duet-room-code" id="duetRoomCode" onclick="copyRoomCode()">——</div>
+      <div class="duet-copy-hint">tap to copy</div>
+    </div>
+
+    <!-- Join input (guest) -->
+    <div class="duet-join-wrap" id="duetJoinWrap">
+      <input class="duet-code-input" id="duetJoinInput" type="text" maxlength="6" placeholder="enter room code" autocomplete="off" autocorrect="off" spellcheck="false" oninput="this.value=this.value.toUpperCase()">
+      <button class="btn-primary" onclick="duetJoin()">join room</button>
+    </div>
+
+    <!-- Status -->
+    <div class="duet-status" id="duetLobbyStatus">
+      <div class="duet-status-dot" id="duetStatusDot"></div>
+      <span id="duetStatusText">choose an option to begin</span>
+    </div>
+
+    <!-- Filter picker (shown once connected) -->
+    <div id="duetFilterSection" style="display:none; width:100%; margin-top:24px;">
+      <p class="section-sub" style="margin-bottom:16px; font-size:14px;">choose a shared filter</p>
+      <div class="filter-grid" style="max-width:100%; margin-bottom:20px;" id="duetFilterGrid">
+        <div class="filter-card selected" data-filter="none" onclick="selectDuetFilter(this)">
+          <div class="filter-thumb"></div><div class="filter-label">Natural</div>
+        </div>
+        <div class="filter-card" data-filter="warm" onclick="selectDuetFilter(this)">
+          <div class="filter-thumb"></div><div class="filter-label">Warm</div>
+        </div>
+        <div class="filter-card" data-filter="cool" onclick="selectDuetFilter(this)">
+          <div class="filter-thumb"></div><div class="filter-label">Cool</div>
+        </div>
+        <div class="filter-card" data-filter="noir" onclick="selectDuetFilter(this)">
+          <div class="filter-thumb"></div><div class="filter-label">Noir</div>
+        </div>
+        <div class="filter-card" data-filter="blush" onclick="selectDuetFilter(this)">
+          <div class="filter-thumb"></div><div class="filter-label">Blush</div>
+        </div>
+        <div class="filter-card" data-filter="golden" onclick="selectDuetFilter(this)">
+          <div class="filter-thumb"></div><div class="filter-label">Golden</div>
+        </div>
+        <div class="filter-card" data-filter="polaroid" onclick="selectDuetFilter(this)">
+          <div class="filter-thumb"></div><div class="filter-label">Polaroid</div>
+        </div>
+        <div class="filter-card" data-filter="nineties" onclick="selectDuetFilter(this)">
+          <div class="filter-thumb"></div><div class="filter-label">90s</div>
+        </div>
+        <div class="filter-card" data-filter="lavender" onclick="selectDuetFilter(this)">
+          <div class="filter-thumb"></div><div class="filter-label">Lavender</div>
+        </div>
+      </div>
+      <button class="btn-primary" id="duetStartBtn" onclick="startDuetBooth()">open the booth</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SCREEN 6: DUET BOOTH ===== -->
+<div class="screen" id="screen-duet-booth">
+  <button class="btn-back" onclick="exitDuetBooth()">back</button>
+  <div class="duet-booth-wrap">
+
+    <div class="booth-header">
+      <div class="shot-counter">duet</div>
+      <div class="shot-dots">
+        <div class="shot-dot" id="duet-dot-0"></div>
+        <div class="shot-dot" id="duet-dot-1"></div>
+        <div class="shot-dot" id="duet-dot-2"></div>
+        <div class="shot-dot" id="duet-dot-3"></div>
+      </div>
+      <div class="shot-counter" id="duetShotLabel">of 4</div>
+    </div>
+
+    <!-- Two viewfinders side by side -->
+    <div class="duet-viewfinders">
+      <!-- Local feed -->
+      <div class="duet-vf-slot" id="duetLocalSlot">
+        <video id="duetVideo" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;display:block;transform:scaleX(-1);"></video>
+        <div class="filter-overlay" id="duetFilterOverlay"></div>
+        <div class="flash-overlay" id="duetFlashOverlay"></div>
+        <div class="countdown-display">
+          <div class="countdown-number" id="duetCountdownNum"></div>
+        </div>
+        <div class="duet-vf-label" id="duetLocalLabel">you</div>
+      </div>
+
+      <!-- Remote feed -->
+      <div class="duet-vf-slot" id="duetRemoteSlot">
+        <div class="duet-remote-placeholder" id="duetRemotePlaceholder">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 10l4.553-2.276A1 1 0 0121 8.723v6.554a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/></svg>
+          <span>waiting for partner</span>
+        </div>
+        <canvas id="duetRemoteCanvas" class="duet-remote-canvas" style="display:none;"></canvas>
+        <div class="flash-overlay" id="duetRemoteFlash"></div>
+        <div class="duet-vf-label" id="duetRemoteLabel">partner</div>
+      </div>
+    </div>
+
+    <!-- Thumbnail pairs -->
+    <div class="duet-thumbs" id="duetThumbsRow">
+      <div class="duet-thumb-pair">
+        <div class="duet-thumb-slot empty" id="duet-lthumb-0"></div>
+        <div class="duet-thumb-slot empty" id="duet-rthumb-0"></div>
+      </div>
+      <div class="duet-thumb-pair">
+        <div class="duet-thumb-slot empty" id="duet-lthumb-1"></div>
+        <div class="duet-thumb-slot empty" id="duet-rthumb-1"></div>
+      </div>
+      <div class="duet-thumb-pair">
+        <div class="duet-thumb-slot empty" id="duet-lthumb-2"></div>
+        <div class="duet-thumb-slot empty" id="duet-rthumb-2"></div>
+      </div>
+      <div class="duet-thumb-pair">
+        <div class="duet-thumb-slot empty" id="duet-lthumb-3"></div>
+        <div class="duet-thumb-slot empty" id="duet-rthumb-3"></div>
+      </div>
+    </div>
+
+    <!-- Ready + shoot controls -->
+    <div id="duetReadyWrap" style="display:flex;flex-direction:column;align-items:center;gap:10px;">
+      <button class="shoot-btn" id="duetShootBtn" onclick="duetPressReady()" disabled></button>
+      <p class="booth-hint" id="duetBoothHint" style="min-height:16px;"></p>
+      <!-- Partner ready pip -->
+      <div style="display:flex;align-items:center;gap:20px;margin-top:2px;">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+          <div id="duetMyReadyPip" style="width:8px;height:8px;border-radius:50%;border:1px solid var(--sepia);transition:all 0.3s;"></div>
+          <span style="font-family:'Space Mono',monospace;font-size:7px;letter-spacing:0.15em;text-transform:uppercase;color:var(--sepia);opacity:0.5;">you</span>
+        </div>
+        <div style="width:24px;height:1px;background:var(--sepia);opacity:0.2;"></div>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+          <div id="duetPartnerReadyPip" style="width:8px;height:8px;border-radius:50%;border:1px solid var(--sepia);transition:all 0.3s;"></div>
+          <span style="font-family:'Space Mono',monospace;font-size:7px;letter-spacing:0.15em;text-transform:uppercase;color:var(--sepia);opacity:0.5;">partner</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="duetCamError" class="cam-error" style="display:none;">
+      Camera unavailable — please allow access and try again.
+    </div>
+
+    <div class="duet-status" id="duetBoothStatus">
+      <div class="duet-status-dot connected" id="duetBoothDot"></div>
+      <span id="duetBoothStatusText">connected</span>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SCREEN 7: DUET STRIP ===== -->
+<div class="screen" id="screen-duet-strip">
+  <button class="btn-back" onclick="goTo('screen-duet-lobby')">back</button>
+  <div class="strip-outer">
+    <p class="section-title"><em>Your</em> duet</p>
+
+    <div class="strip-container" id="duetStripContainer">
+      <div class="duet-strip-names" id="duetStripNames">
+        <span id="duetStripName1">you</span>
+        <span id="duetStripName2">partner</span>
+      </div>
+      <!-- Side-by-side columns -->
+      <div style="display:flex;gap:3px;align-items:flex-start;">
+        <div class="duet-col" id="duetStripLeft" style="display:flex;flex-direction:column;gap:3px;"></div>
+        <div style="width:1px;background:rgba(139,111,92,0.18);flex-shrink:0;"></div>
+        <div class="duet-col" id="duetStripRight" style="display:flex;flex-direction:column;gap:3px;"></div>
+      </div>
+      <div class="strip-footer">the candid archive</div>
+      <div class="strip-date" id="duetStripDate"></div>
+    </div>
+
+    <div class="strip-actions">
+      <button class="btn-download" onclick="downloadDuetStrip()">↓ save this memory</button>
+      <button class="btn-retake" onclick="leaveDuet()">take another</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ─── State ───────────────────────────────────────────────
+  let selectedFilter = 'none';
+  let capturedImages = [];
+  let shotsTaken = 0;
+  let isCapturing = false;
+  let stream = null;
+
+  const FILTER_CSS = {
+    none:     'none',
+    warm:     'sepia(0.3) saturate(1.2) brightness(1.05)',
+    cool:     'saturate(0.8) hue-rotate(15deg) brightness(1.05)',
+    noir:     'grayscale(1) contrast(1.1) brightness(0.95)',
+    blush:    'sepia(0.15) saturate(1.3) hue-rotate(-10deg) brightness(1.08)',
+    golden:   'sepia(0.4) saturate(1.5) brightness(1.1) hue-rotate(-5deg)',
+    polaroid: 'none',
+    dreamy:   'none',
+    nineties: 'none',
+    lavender: 'none',
+  };
+
+  const FILTER_OVERLAY = {
+    none:     'transparent',
+    warm:     'rgba(180,100,40,0.12)',
+    cool:     'rgba(60,100,180,0.1)',
+    noir:     'rgba(0,0,0,0)',
+    blush:    'rgba(220,80,120,0.18)',
+    golden:   'rgba(200,120,20,0.18)',
+    polaroid: 'rgba(210,195,140,0.18)',
+    dreamy:   'rgba(220,200,255,0.16)',
+    nineties: 'rgba(80,200,80,0.10)',
+    lavender: 'rgba(160,120,220,0.18)',
+  };
+
+  // ─── Heart system (blush filter only) ────────────────────
+
+  function heartPath(ctx, cx, cy, size) {
+    const s = size / 10;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy + s * 3);
+    ctx.bezierCurveTo(cx - s * 5, cy,           cx - s * 5, cy - s * 3.5, cx, cy - s * 1.5);
+    ctx.bezierCurveTo(cx + s * 5, cy - s * 3.5, cx + s * 5, cy,           cx, cy + s * 3);
+    ctx.closePath();
+  }
+
+  const BLUSH_HEART_COLORS = ['#e87b9a','#f0a0b8','#d95f88','#f4bcd0','#c94f7a'];
+
+  // Only bakes hearts when filter is blush
+  function drawHeartsOnCanvas(ctx, W, H) {
+    if (selectedFilter !== 'blush') return;
+    const count = 10 + Math.floor(Math.random() * 6); // 10–15 hearts
+    for (let i = 0; i < count; i++) {
+      const x     = 16 + Math.random() * (W - 32);
+      const y     = 16 + Math.random() * (H - 32);
+      const size  = 22 + Math.random() * 28;          // bigger: 22–50px
+      const alpha = 0.28 + Math.random() * 0.38;
+      const color = BLUSH_HEART_COLORS[Math.floor(Math.random() * BLUSH_HEART_COLORS.length)];
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle   = color;
+      ctx.translate(x, y);
+      ctx.rotate((Math.random() - 0.5) * 0.5);
+      heartPath(ctx, 0, 0, size);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+
+  function goTo(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    const target = document.getElementById(id);
+    target.classList.add('active');
+    // re-trigger animation
+    target.style.animation = 'none';
+    target.offsetHeight;
+    target.style.animation = '';
+  }
+
+  // ─── Filter selection ────────────────────────────────────
+  function selectFilter(el) {
+    document.querySelectorAll('.filter-card').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+    selectedFilter = el.dataset.filter;
+  }
+
+  // ─── Start booth ─────────────────────────────────────────
+  async function startBooth() {
+    goTo('screen-booth');
+    capturedImages = [];
+    shotsTaken = 0;
+
+    // Reset dots and thumbs
+    for (let i = 0; i < 4; i++) {
+      document.getElementById(`dot-${i}`).classList.remove('filled');
+      const slot = document.getElementById(`thumb-${i}`);
+      slot.innerHTML = '';
+      slot.classList.add('empty');
+    }
+
+    document.getElementById('shootBtn').disabled = false;
+    document.getElementById('boothHint').textContent = 'press to capture';
+
+    // Apply filter overlay
+    const overlay = document.getElementById('filterOverlay');
+    overlay.style.background = FILTER_OVERLAY[selectedFilter];
+
+    // Apply grayscale to video for noir
+    const video = document.getElementById('video');
+    video.style.filter = selectedFilter === 'noir' ? 'grayscale(1) contrast(1.05)' : 'none';
+
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 960 } },
+        audio: false
+      });
+      video.srcObject = stream;
+      document.getElementById('camError').style.display = 'none';
+    } catch (e) {
+      document.getElementById('camError').style.display = 'block';
+      document.getElementById('shootBtn').disabled = true;
+    }
+  }
+
+  // ─── Countdown & auto-capture all 4 shots ────────────────
+  function startCountdown() {
+    if (isCapturing) return;
+    isCapturing = true;
+    document.getElementById('shootBtn').disabled = true;
+    runCountdownThenCapture();
+  }
+
+  function runCountdownThenCapture() {
+    let count = 3;
+    const numEl = document.getElementById('countdownNum');
+    const remaining = 4 - shotsTaken;
+    document.getElementById('boothHint').textContent =
+      `photo ${shotsTaken + 1} of 4 — smile!`;
+
+    function tick() {
+      numEl.classList.remove('show');
+      setTimeout(() => {
+        numEl.textContent = count;
+        numEl.classList.add('show');
+        if (count === 0) {
+          setTimeout(() => {
+            captureFrame();
+            // If more shots remain, kick off next countdown after a short pause
+            if (shotsTaken < 4) {
+              setTimeout(runCountdownThenCapture, 800);
+            }
+          }, 400);
+        } else {
+          count--;
+          setTimeout(tick, 900);
+        }
+      }, 80);
+    }
+    tick();
+  }
+
+  function captureFrame() {
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('captureCanvas');
+
+    // Use actual video resolution; crop to 4:3 (cover, no squish)
+    const vw = video.videoWidth  || 640;
+    const vh = video.videoHeight || 480;
+    const TARGET_RATIO = 4 / 3;
+    const videoRatio  = vw / vh;
+
+    let srcX, srcY, srcW, srcH;
+    if (videoRatio > TARGET_RATIO) {
+      srcH = vh;
+      srcW = vh * TARGET_RATIO;
+      srcX = (vw - srcW) / 2;
+      srcY = 0;
+    } else {
+      srcW = vw;
+      srcH = vw / TARGET_RATIO;
+      srcX = 0;
+      srcY = (vh - srcH) / 2;
+    }
+
+    const W = Math.round(srcW), H = Math.round(srcH);
+    canvas.width  = W;
+    canvas.height = H;
+
+    const ctx = canvas.getContext('2d');
+    ctx.save();
+    ctx.translate(W, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, srcX, srcY, srcW, srcH, 0, 0, W, H);
+    ctx.restore();
+
+    applyFilterToCanvas(ctx, W, H);
+    drawHeartsOnCanvas(ctx, W, H);
+
+    const dataURL = canvas.toDataURL('image/jpeg', 0.92);
+    capturedImages.push(dataURL);
+
+    // Flash
+    const flash = document.getElementById('flashOverlay');
+    flash.style.opacity = '1';
+    setTimeout(() => { flash.style.opacity = '0'; }, 80);
+
+    // Update dot
+    document.getElementById(`dot-${shotsTaken}`).classList.add('filled');
+
+    // Update thumbnail
+    const slot = document.getElementById(`thumb-${shotsTaken}`);
+    slot.classList.remove('empty');
+    const img = document.createElement('img');
+    img.src = dataURL;
+    slot.innerHTML = '';
+    slot.appendChild(img);
+
+    // Hide countdown number
+    document.getElementById('countdownNum').classList.remove('show');
+
+    shotsTaken++;
+
+    if (shotsTaken >= 4) {
+      document.getElementById('boothHint').textContent = 'developing your strip...';
+      isCapturing = false;
+      setTimeout(showStrip, 1200);
+    }
+  }
+
+  function applyFilterToCanvas(ctx, W, H) {
+    const f = selectedFilter;
+    if (f === 'none') return;
+
+    const imageData = ctx.getImageData(0, 0, W, H);
+    const d = imageData.data;
+
+    for (let i = 0; i < d.length; i += 4) {
+      let r = d[i], g = d[i+1], b = d[i+2];
+
+      if (f === 'warm') {
+        r = Math.min(255, r * 1.08 + 12);
+        g = Math.min(255, g * 1.02 + 4);
+        b = Math.max(0, b * 0.88);
+      } else if (f === 'cool') {
+        r = Math.max(0, r * 0.88);
+        g = Math.min(255, g * 0.96);
+        b = Math.min(255, b * 1.12 + 10);
+      } else if (f === 'noir') {
+        const gray = r * 0.299 + g * 0.587 + b * 0.114;
+        const contrast = (gray - 128) * 1.1 + 128;
+        r = g = b = Math.min(255, Math.max(0, contrast));
+      } else if (f === 'blush') {
+        r = Math.min(255, r * 1.18 + 22);
+        g = Math.min(255, g * 0.88 + 4);
+        b = Math.min(255, b * 0.96 + 8);
+      } else if (f === 'golden') {
+        // Crush shadows into warm dark-amber (blacks go brown, not grey)
+        r = Math.min(255, r * 0.92 + 18);
+        g = Math.min(255, g * 0.82 + 8);
+        b = Math.max(0,   b * 0.58 - 8);
+        // Boost highlights into rich gold — reds and greens punch up, blues stay crushed
+        const gLum = r * 0.299 + g * 0.587 + b * 0.114;
+        if (gLum > 100) {
+          const t = Math.min(1, (gLum - 100) / 155);
+          r = Math.min(255, r + t * 28);
+          g = Math.min(255, g + t * 14);
+          b = Math.max(0,   b - t * 10);
+        }
+        // Punch contrast — deepen the darks further
+        r = Math.min(255, (r - 128) * 1.12 + 128);
+        g = Math.min(255, (g - 128) * 1.08 + 128);
+        b = Math.max(0,   (b - 128) * 1.05 + 128);
+      } else if (f === 'polaroid') {
+        // 1. Lift blacks — shadows never go fully dark (milky/creamy)
+        r = r * 0.78 + 38;
+        g = g * 0.78 + 36;
+        b = b * 0.78 + 30;
+        // 2. Warm yellow-green chemical cast in midtones
+        r = Math.min(255, r * 1.02 + 2);
+        g = Math.min(255, g * 1.02 + 3);
+        b = Math.max(0,   b * 0.94 - 1);
+        // 3. Slight cyan push in shadows (Polaroid shadow tint)
+        const lum = r * 0.299 + g * 0.587 + b * 0.114;
+        if (lum < 100) {
+          b = Math.min(255, b + (100 - lum) * 0.08);
+          g = Math.min(255, g + (100 - lum) * 0.04);
+        }
+        // 4. Low contrast — compress highlights down
+        r = Math.min(235, r); g = Math.min(232, g); b = Math.min(228, b);
+      } else if (f === 'dreamy') {
+        // Moderate milky lift — softer, not overwhelmingly white
+        r = Math.min(255, r * 0.78 + 48);
+        g = Math.min(255, g * 0.78 + 46);
+        b = Math.min(255, b * 0.80 + 52);
+        // Cool-lavender push only in highlights
+        const hiLum = r * 0.299 + g * 0.587 + b * 0.114;
+        if (hiLum > 140) {
+          r = Math.max(0, r - (hiLum - 140) * 0.05);
+          b = Math.min(255, b + (hiLum - 140) * 0.08);
+        }
+        // Compress contrast gently
+        r = Math.min(234, Math.max(48, r));
+        g = Math.min(231, Math.max(48, g));
+        b = Math.min(240, Math.max(52, b));
+      } else if (f === 'nineties') {
+        // Oversaturated, green-shifted like a drugstore print
+        const avg = (r + g + b) / 3;
+        r = Math.min(255, avg + (r - avg) * 1.7);
+        g = Math.min(255, avg + (g - avg) * 1.65);
+        b = Math.min(255, avg + (b - avg) * 1.5);
+        // Green channel push
+        g = Math.min(255, g * 1.08 + 6);
+        // Slight magenta in shadows
+        const sLum = r * 0.299 + g * 0.587 + b * 0.114;
+        if (sLum < 80) {
+          r = Math.min(255, r + (80 - sLum) * 0.12);
+          b = Math.min(255, b + (80 - sLum) * 0.08);
+        }
+        // Lifted blacks — cheap print paper
+        r = r * 0.88 + 18;
+        g = g * 0.88 + 16;
+        b = b * 0.88 + 14;
+      } else if (f === 'lavender') {
+        // Desaturate slightly then push purple-blue
+        const lavLum = r * 0.299 + g * 0.587 + b * 0.114;
+        r = Math.min(255, lavLum * 0.55 + r * 0.45 + 18);
+        g = Math.min(255, lavLum * 0.55 + g * 0.45 + 10);
+        b = Math.min(255, lavLum * 0.40 + b * 0.60 + 38);
+        // Lift overall — airy, not heavy
+        r = Math.min(255, r * 0.92 + 20);
+        g = Math.min(255, g * 0.92 + 16);
+        b = Math.min(255, b * 0.94 + 22);
+        // Soft contrast compression
+        r = Math.min(230, Math.max(28, r));
+        g = Math.min(225, Math.max(25, g));
+        b = Math.min(240, Math.max(35, b));
+      }
+
+      d[i] = r; d[i+1] = g; d[i+2] = b;
+    }
+    ctx.putImageData(imageData, 0, 0);
+
+    // ── Polaroid post-processing ──────────────────────────
+    if (f === 'polaroid') {
+      const cx = W / 2, cy = H / 2;
+
+      // Center glow — slightly overexposed middle
+      const glowGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(W, H) * 0.55);
+      glowGrad.addColorStop(0,   'rgba(255,248,230,0.22)');
+      glowGrad.addColorStop(0.5, 'rgba(255,248,230,0.06)');
+      glowGrad.addColorStop(1,   'rgba(255,248,230,0)');
+      ctx.fillStyle = glowGrad;
+      ctx.fillRect(0, 0, W, H);
+
+      // Vignette — soft dark edges
+      const vigGrad = ctx.createRadialGradient(cx, cy, Math.min(W, H) * 0.3, cx, cy, Math.max(W, H) * 0.82);
+      vigGrad.addColorStop(0,   'rgba(0,0,0,0)');
+      vigGrad.addColorStop(0.7, 'rgba(0,0,0,0.08)');
+      vigGrad.addColorStop(1,   'rgba(10,8,4,0.38)');
+      ctx.fillStyle = vigGrad;
+      ctx.fillRect(0, 0, W, H);
+
+      // Grain — fine luminance noise
+      const grainData = ctx.getImageData(0, 0, W, H);
+      const gd = grainData.data;
+      for (let i = 0; i < gd.length; i += 4) {
+        const noise = (Math.random() - 0.5) * 28;
+        gd[i]   = Math.min(255, Math.max(0, gd[i]   + noise));
+        gd[i+1] = Math.min(255, Math.max(0, gd[i+1] + noise));
+        gd[i+2] = Math.min(255, Math.max(0, gd[i+2] + noise));
+      }
+      ctx.putImageData(grainData, 0, 0);
+
+      // Subtle warm light-leak — top-left corner bloom
+      const leakGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, W * 0.45);
+      leakGrad.addColorStop(0,   'rgba(255,210,120,0.14)');
+      leakGrad.addColorStop(0.6, 'rgba(255,190,80,0.04)');
+      leakGrad.addColorStop(1,   'rgba(255,180,60,0)');
+      ctx.fillStyle = leakGrad;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // ── Dreamy post-processing ────────────────────────────
+    if (f === 'dreamy') {
+      const cx = W / 2, cy = H / 2;
+
+      // Highlights-only glow — read pixels, boost only the bright ones
+      const glowData = ctx.getImageData(0, 0, W, H);
+      const gd = glowData.data;
+      for (let i = 0; i < gd.length; i += 4) {
+        const lum = gd[i] * 0.299 + gd[i+1] * 0.587 + gd[i+2] * 0.114;
+        if (lum > 170) {
+          // Strength 0→1 as luminance goes 170→255
+          const strength = Math.min(1, (lum - 170) / 85);
+          // Multiply factor scales from 1.0 (no boost) up to 1.45 at full brightness
+          const factor = 1 + strength * 0.45;
+          gd[i]   = Math.min(255, gd[i]   * factor);
+          gd[i+1] = Math.min(255, gd[i+1] * factor);
+          gd[i+2] = Math.min(255, gd[i+2] * factor + strength * 18); // slight lavender tint in whites
+        }
+      }
+      ctx.putImageData(glowData, 0, 0);
+
+      // Soft vignette — just at the very edges, barely there
+      const vigGrad = ctx.createRadialGradient(cx, cy, Math.min(W,H) * 0.45, cx, cy, Math.max(W,H) * 0.92);
+      vigGrad.addColorStop(0,   'rgba(0,0,0,0)');
+      vigGrad.addColorStop(0.85,'rgba(20,10,40,0.04)');
+      vigGrad.addColorStop(1,   'rgba(20,10,40,0.16)');
+      ctx.fillStyle = vigGrad;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // ── 90s post-processing ───────────────────────────────
+    if (f === 'nineties') {
+      // Halation — colour bleeding at bright edges (magenta/cyan fringe feel)
+      const hGrad = ctx.createRadialGradient(W*0.5, H*0.3, 0, W*0.5, H*0.3, Math.max(W,H)*0.6);
+      hGrad.addColorStop(0,   'rgba(255,40,120,0.07)');
+      hGrad.addColorStop(0.5, 'rgba(40,220,160,0.04)');
+      hGrad.addColorStop(1,   'rgba(0,0,0,0)');
+      ctx.fillStyle = hGrad;
+      ctx.fillRect(0, 0, W, H);
+      // Heavier grain — cheap film stock
+      const grainData = ctx.getImageData(0, 0, W, H);
+      const gd = grainData.data;
+      for (let i = 0; i < gd.length; i += 4) {
+        const n = (Math.random() - 0.5) * 36;
+        gd[i]   = Math.min(255, Math.max(0, gd[i]   + n));
+        gd[i+1] = Math.min(255, Math.max(0, gd[i+1] + n * 0.85));
+        gd[i+2] = Math.min(255, Math.max(0, gd[i+2] + n * 0.75));
+      }
+      ctx.putImageData(grainData, 0, 0);
+      // Hard vignette corners
+      const vigGrad = ctx.createRadialGradient(W/2, H/2, Math.min(W,H)*0.25, W/2, H/2, Math.max(W,H)*0.78);
+      vigGrad.addColorStop(0, 'rgba(0,0,0,0)');
+      vigGrad.addColorStop(1, 'rgba(0,0,0,0.42)');
+      ctx.fillStyle = vigGrad;
+      ctx.fillRect(0, 0, W, H);
+    }
+  }
+
+  // ─── Strip themes per filter ─────────────────────────────
+  const STRIP_THEMES = {
+    none:     { bg: '#ffffff', edge: '#f0ece6', footer: '#9a8a7a', date: '#c8b8a8', frame: 'rgba(0,0,0,0.06)' },
+    warm:     { bg: '#fdf6ec', edge: '#e8d8c0', footer: '#a07850', date: '#c8a878', frame: 'rgba(120,70,20,0.08)' },
+    cool:     { bg: '#f0f4f8', edge: '#c8d8e8', footer: '#6888a8', date: '#98b0c8', frame: 'rgba(40,80,140,0.07)' },
+    noir:     { bg: '#1a1a1a', edge: '#000000', footer: '#c0c0c0', date: '#707070', frame: 'rgba(255,255,255,0.08)' },
+    blush:    { bg: '#fdf0f2', edge: '#f0c8d0', footer: '#c06878', date: '#e0a0b0', frame: 'rgba(180,60,80,0.07)' },
+    golden:   { bg: '#1c1008', edge: '#0a0500', footer: '#c88030', date: '#906020', frame: 'rgba(200,130,20,0.15)' },
+    polaroid: { bg: '#f8f4e8', edge: '#e8e0c8', footer: '#a09070', date: '#c0b090', frame: 'rgba(100,80,40,0.07)' },
+    dreamy:   { bg: '#f8f4ff', edge: '#e0d4f8', footer: '#9080b8', date: '#b8a8d8', frame: 'rgba(100,70,180,0.06)' },
+    nineties: { bg: '#f0faec', edge: '#c0e8b0', footer: '#408030', date: '#80b868', frame: 'rgba(40,140,20,0.08)' },
+    lavender: { bg: '#f4f0fa', edge: '#d8c8f0', footer: '#7860a8', date: '#a890c8', frame: 'rgba(90,60,160,0.07)' },
+  };
+
+  // ─── Show strip ──────────────────────────────────────────
+  function showStrip() {
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+
+    const theme = STRIP_THEMES[selectedFilter] || STRIP_THEMES.none;
+
+    // Apply theme to preview strip container
+    const container = document.getElementById('stripContainer');
+    container.style.background = theme.bg;
+    container.style.borderColor = theme.edge;
+
+    // Footer text color
+    document.getElementById('stripImages').querySelectorAll('img').forEach(img => img.remove());
+    document.querySelector('.strip-footer').style.color = theme.footer;
+    document.getElementById('stripDate').style.color = theme.date;
+
+    const stripImages = document.getElementById('stripImages');
+    stripImages.innerHTML = '';
+    capturedImages.forEach(src => {
+      const img = document.createElement('img');
+      img.src = src;
+      // Thin frame color per theme
+      img.style.outline = `1px solid ${theme.frame}`;
+      stripImages.appendChild(img);
+    });
+
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+    document.getElementById('stripDate').textContent = dateStr;
+
+    goTo('screen-strip');
+  }
+
+  // ─── Cover-crop helper ───────────────────────────────────
+  function drawImageCover(ctx, img, dx, dy, dw, dh) {
+    const iw = img.naturalWidth  || img.width;
+    const ih = img.naturalHeight || img.height;
+    const scale = Math.max(dw / iw, dh / ih);
+    const sw = dw / scale, sh = dh / scale;
+    const sx = (iw - sw) / 2, sy = (ih - sh) / 2;
+    ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
+  }
+
+  // ─── Download strip ──────────────────────────────────────
+  function downloadStrip() {
+    const canvas = document.getElementById('captureCanvas');
+    const PHOTO_W = 480;
+    const PHOTO_H = 360;
+    const GAP = 6;
+    const PAD_X = 28;
+    const PAD_TOP = 28;
+    const PAD_BOTTOM = 70;
+    const W = PHOTO_W + PAD_X * 2;
+    const H = PAD_TOP + (PHOTO_H * 4) + (GAP * 3) + PAD_BOTTOM;
+
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext('2d');
+
+    const theme = STRIP_THEMES[selectedFilter] || STRIP_THEMES.none;
+
+    // Themed background
+    ctx.fillStyle = theme.bg;
+    ctx.fillRect(0, 0, W, H);
+
+    // Themed edge bars
+    ctx.fillStyle = theme.edge;
+    ctx.fillRect(0, 0, W, 8);
+    ctx.fillRect(0, H - 8, W, 8);
+
+    // Load all images and draw
+    let loaded = 0;
+    capturedImages.forEach((src, i) => {
+      const img = new Image();
+      img.onload = () => {
+        const y = PAD_TOP + i * (PHOTO_H + GAP);
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(PAD_X, y, PHOTO_W, PHOTO_H);
+        ctx.clip();
+        drawImageCover(ctx, img, PAD_X, y, PHOTO_W, PHOTO_H);
+        ctx.restore();
+
+        // Themed frame
+        ctx.strokeStyle = theme.frame;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(PAD_X, y, PHOTO_W, PHOTO_H);
+
+        loaded++;
+        if (loaded === 4) drawStripFooter(ctx, W, H, theme);
+      };
+      img.src = src;
+    });
+  }
+
+  function drawStripFooter(ctx, W, H, theme) {
+    const PAD_BOTTOM = 70;
+
+    ctx.fillStyle = theme.footer;
+    ctx.font = 'italic 18px "Playfair Display", Georgia, serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('the candid archive', W / 2, H - PAD_BOTTOM + 22);
+
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }).toUpperCase();
+    ctx.font = '10px "Space Mono", monospace';
+    ctx.fillStyle = theme.date;
+    ctx.fillText(dateStr, W / 2, H - PAD_BOTTOM + 42);
+
+    const canvas = document.getElementById('captureCanvas');
+    const link = document.createElement('a');
+    link.download = `the-candid-archive-${Date.now()}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+  }
+
+  // ─── Retake ──────────────────────────────────────────────
+  function retake() {
+    capturedImages = [];
+    shotsTaken = 0;
+    goTo('screen-landing');
+  }
+
+  function exitBooth() {
+    // Stop camera stream and reset state before going back
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    isCapturing = false;
+    capturedImages = [];
+    shotsTaken = 0;
+    document.getElementById('shootBtn').disabled = false;
+    goTo('screen-filter');
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  DUET MODE
+  // ═══════════════════════════════════════════════════════════
+
+  // ─── Duet state ─────────────────────────────────────────────
+  let socket = null;
+  let duetRoom = null;           // current room code
+  let duetRole = null;           // 'host' | 'guest'
+  let duetFilter = 'none';
+  let duetStream = null;
+  let duetShotsTaken = 0;
+  let duetMyImages = [];
+  let duetPartnerImages = [];
+  let duetIsCapturing = false;
+  let duetFrameInterval = null;
+  let duetIAmReady = false;
+  let duetPartnerReady = false;
+
+  // ─── Connect socket (once, lazily) ───────────────────────────
+  function getSocket() {
+    if (socket && socket.connected) return socket;
+    socket = io({ transports: ['websocket', 'polling'] });
+
+    socket.on('connect', () => {
+      setDuetStatus('server connected', 'connected');
+    });
+
+    socket.on('connect_error', () => {
+      setDuetStatus('cannot reach server — try again', 'error');
+    });
+
+    // ── Room events ──
+    socket.on('room_created', (code) => {
+      setDuetStatus('room open — share the code', 'waiting');
+    });
+
+    socket.on('partner_joined', () => {
+      setDuetStatus('partner connected!', 'connected');
+      document.getElementById('duetFilterSection').style.display = 'block';
+      // Push current filter to guest immediately
+      socket.emit('set_filter', { code: duetRoom, filter: duetFilter });
+    });
+
+    socket.on('joined_room', ({ code, filter }) => {
+      duetRoom = code;
+      duetFilter = filter;
+      selectedFilter = filter;
+      setDuetStatus('connected! waiting for host to pick filter…', 'connected');
+      document.getElementById('duetFilterSection').style.display = 'block';
+      document.getElementById('duetStartBtn').style.display = 'none';
+      document.querySelectorAll('#duetFilterGrid .filter-card').forEach(c => {
+        c.style.pointerEvents = 'none'; c.style.opacity = '0.5';
+      });
+      // Reflect host's current filter
+      applyFilterPreview(filter);
+    });
+
+    socket.on('error_msg', (msg) => {
+      setDuetStatus(msg, 'error');
+      document.getElementById('duetJoinInput').disabled = false;
+    });
+
+    socket.on('partner_left', () => {
+      setDuetStatus('partner disconnected', 'error');
+      setDuetBoothStatus('partner disconnected');
+    });
+
+    // ── Booth events ──
+    socket.on('filter_changed', (filter) => {
+      duetFilter = filter;
+      selectedFilter = filter;
+      applyFilterPreview(filter);
+    });
+
+    socket.on('booth_started', (filter) => {
+      duetFilter = filter;
+      selectedFilter = filter;
+      startDuetBooth();
+    });
+
+    socket.on('partner_ready', () => {
+      duetPartnerReady = true;
+      setPip('duetPartnerReadyPip', true);
+      checkBothReady();
+    });
+
+    socket.on('countdown', (n) => {
+      const num = document.getElementById('duetCountdownNum');
+      num.classList.remove('show');
+      setTimeout(() => { num.textContent = n; num.classList.add('show'); }, 60);
+      if (n === 0) {
+        const fl = document.getElementById('duetFlashOverlay');
+        fl.style.opacity = '1';
+        setTimeout(() => fl.style.opacity = '0', 80);
+      }
+    });
+
+    socket.on('fire', () => {
+      setTimeout(() => duetSnapFrame(), 0);
+    });
+
+    socket.on('photo', ({ shot, data }) => {
+      duetPartnerImages[shot] = data;
+      const partnerThumbId = duetRole === 'guest' ? `duet-lthumb-${shot}` : `duet-rthumb-${shot}`;
+      const rslot = document.getElementById(partnerThumbId);
+      if (rslot) { rslot.classList.remove('empty'); rslot.innerHTML = `<img src="${data}">`; }
+      const rf = document.getElementById('duetRemoteFlash');
+      rf.style.opacity = '1';
+      setTimeout(() => rf.style.opacity = '0', 80);
+      checkDuetComplete();
+    });
+
+    socket.on('frame', (data) => {
+      renderRemoteFrame(data);
+    });
+
+    return socket;
+  }
+
+  function applyFilterPreview(filter) {
+    document.querySelectorAll('#duetFilterGrid .filter-card').forEach(c => c.classList.remove('selected'));
+    const fc = document.querySelector(`#duetFilterGrid [data-filter="${filter}"]`);
+    if (fc) fc.classList.add('selected');
+  }
+
+  // ─── Send helper ─────────────────────────────────────────────
+  function sendDuet(type, payload) {
+    if (!socket) return;
+    socket.emit(type, { code: duetRoom, ...payload });
+  }
+
+  // ─── Generate room code ───────────────────────────────────────
+  function genRoomCode() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code = '';
+    for (let i = 0; i < 5; i++) code += chars[Math.floor(Math.random() * chars.length)];
+    return code;
+  }
+
+  function setDuetStatus(text, state) {
+    const dot = document.getElementById('duetStatusDot');
+    const txt = document.getElementById('duetStatusText');
+    txt.textContent = text;
+    dot.className = 'duet-status-dot ' + (state || '');
+  }
+
+  function setDuetBoothStatus(text) {
+    document.getElementById('duetBoothStatusText').textContent = text;
+  }
+
+  // ─── Lobby: create room ──────────────────────────────────────
+  function duetCreate() {
+    duetRole = 'host';
+    const code = genRoomCode();
+    duetRoom = code;
+
+    document.getElementById('duetOptions').style.display = 'none';
+    document.getElementById('duetRoomCard').classList.add('visible');
+    document.getElementById('duetRoomCode').textContent = code;
+    setDuetStatus('opening room…', 'waiting');
+
+    const s = getSocket();
+    s.emit('create_room', code);
+  }
+
+  // ─── Lobby: show join input ───────────────────────────────────
+  function showJoinInput() {
+    document.getElementById('duetOptions').style.display = 'none';
+    document.getElementById('duetJoinWrap').classList.add('visible');
+    setDuetStatus('enter a room code to join', '');
+    document.getElementById('duetJoinInput').focus();
+  }
+
+  // ─── Lobby: join room ─────────────────────────────────────────
+  function duetJoin() {
+    const raw = document.getElementById('duetJoinInput').value.trim().toUpperCase();
+    if (raw.length < 4) { setDuetStatus('please enter a valid code', 'error'); return; }
+
+    duetRole = 'guest';
+    duetRoom = raw;
+    setDuetStatus('joining room…', 'waiting');
+    document.getElementById('duetJoinInput').disabled = true;
+
+    const s = getSocket();
+    s.emit('join_room', raw);
+  }
+
+  // ─── Filter selection (duet) ─────────────────────────────────
+  function selectDuetFilter(el) {
+    if (duetRole === 'guest') return;
+    document.querySelectorAll('#duetFilterGrid .filter-card').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+    duetFilter = el.dataset.filter;
+    selectedFilter = duetFilter;
+    socket.emit('set_filter', { code: duetRoom, filter: duetFilter });
+  }
+
+  // ─── Copy room code ──────────────────────────────────────────
+  function copyRoomCode() {
+    const code = document.getElementById('duetRoomCode').textContent;
+    navigator.clipboard.writeText(code).then(() => {
+      const el = document.getElementById('duetRoomCode');
+      const orig = el.textContent;
+      el.textContent = 'copied!';
+      setTimeout(() => el.textContent = orig, 1400);
+    });
+  }
+
+  // ─── Start duet booth ────────────────────────────────────────
+  async function startDuetBooth() {
+    // Host broadcasts start to guest
+    if (duetRole === 'host') {
+      socket.emit('start_booth', { code: duetRoom, filter: duetFilter });
+    }
+
+    // Reset state
+    duetShotsTaken = 0;
+    duetMyImages = [];
+    duetPartnerImages = [];
+    duetIsCapturing = false;
+    duetIAmReady = false;
+    duetPartnerReady = false;
+
+    for (let i = 0; i < 4; i++) {
+      document.getElementById(`duet-dot-${i}`).classList.remove('filled');
+      ['l','r'].forEach(side => {
+        const sl = document.getElementById(`duet-${side}thumb-${i}`);
+        if (sl) { sl.innerHTML = ''; sl.classList.add('empty'); }
+      });
+    }
+
+    // Both sides have the button — disabled until camera ready
+    document.getElementById('duetShootBtn').disabled = true;
+    document.getElementById('duetShootBtn').style.display = 'flex';
+    document.getElementById('duetBoothHint').textContent = 'starting camera…';
+    setPip('duetMyReadyPip', false);
+    setPip('duetPartnerReadyPip', false);
+
+    document.getElementById('duetFilterOverlay').style.background = FILTER_OVERLAY[duetFilter] || 'transparent';
+
+    const video = document.getElementById('duetVideo');
+    video.style.filter = duetFilter === 'noir' ? 'grayscale(1) contrast(1.05)' : 'none';
+
+    goTo('screen-duet-booth');
+
+    // Guest: visually swap viewfinders so host is always left, guest always right
+    if (duetRole === 'guest') {
+      document.getElementById('duetLocalSlot').style.order  = '2';
+      document.getElementById('duetRemoteSlot').style.order = '1';
+      document.getElementById('duetLocalLabel').textContent  = 'you';
+      document.getElementById('duetRemoteLabel').textContent = 'partner';
+    } else {
+      document.getElementById('duetLocalSlot').style.order  = '1';
+      document.getElementById('duetRemoteSlot').style.order = '2';
+    }
+
+    try {
+      duetStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 960 } },
+        audio: false
+      });
+      video.srcObject = duetStream;
+      document.getElementById('duetCamError').style.display = 'none';
+      startFrameStreaming();
+      // Enable button now that camera is live
+      document.getElementById('duetShootBtn').disabled = false;
+      document.getElementById('duetBoothHint').textContent = 'photo 1 of 4 — press when ready';
+    } catch (e) {
+      document.getElementById('duetCamError').style.display = 'block';
+      document.getElementById('duetShootBtn').disabled = true;
+    }
+  }
+
+  // ─── Stream video preview frames to partner (low-res JPEG) ──
+  function startFrameStreaming() {
+    if (duetFrameInterval) clearInterval(duetFrameInterval);
+    const tmpCanvas = document.createElement('canvas');
+    tmpCanvas.width = 240; tmpCanvas.height = 180;
+    const tmpCtx = tmpCanvas.getContext('2d');
+
+    duetFrameInterval = setInterval(() => {
+      if (!socket || !socket.connected) return;
+      const video = document.getElementById('duetVideo');
+      if (!video.videoWidth) return;
+
+      tmpCtx.save();
+      tmpCtx.translate(240, 0);
+      tmpCtx.scale(-1, 1);
+      tmpCtx.drawImage(video, 0, 0, 240, 180);
+      tmpCtx.restore();
+
+      socket.emit('frame', { code: duetRoom, data: tmpCanvas.toDataURL('image/jpeg', 0.4) });
+    }, 150); // ~6 fps — good enough for preview, low bandwidth
+  }
+
+  // ─── Render partner's streamed frame ────────────────────────
+  function renderRemoteFrame(dataUrl) {
+    const placeholder = document.getElementById('duetRemotePlaceholder');
+    const canvas = document.getElementById('duetRemoteCanvas');
+
+    if (placeholder.style.display !== 'none') {
+      placeholder.style.display = 'none';
+      canvas.style.display = 'block';
+    }
+
+    const img = new Image();
+    img.onload = () => {
+      const ctx = canvas.getContext('2d');
+      canvas.width = canvas.offsetWidth || 240;
+      canvas.height = canvas.offsetHeight || 180;
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      // Apply filter visually to remote preview
+      canvas.style.filter = FILTER_CSS[duetFilter] || 'none';
+    };
+    img.src = dataUrl;
+  }
+
+  // ─── Ready-handshake helpers ─────────────────────────────────
+  function setPip(id, on) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.background = on ? 'var(--gold)' : 'transparent';
+    el.style.borderColor = on ? 'var(--gold)' : 'var(--sepia)';
+    el.style.boxShadow   = on ? '0 0 6px rgba(201,168,76,0.5)' : 'none';
+  }
+
+  function updateShootBtn() {
+    const btn  = document.getElementById('duetShootBtn');
+    const hint = document.getElementById('duetBoothHint');
+    const both = duetIAmReady && duetPartnerReady;
+
+    if (duetIsCapturing) {
+      btn.disabled = true;
+      return;
+    }
+
+    if (both) {
+      // Both ready — only host fires; guest btn is cosmetic (already pulsing)
+      if (duetRole === 'host') {
+        btn.disabled = false;
+        // Immediately trigger countdown — button press already set me ready
+        // Actually: button is now the "I'm ready" toggle, so when both ready the host auto-fires
+        // Hint updates handled in checkBothReady
+      } else {
+        btn.disabled = true; // guest: waiting for host to auto-fire
+        hint.textContent = 'both ready — shooting in 3…';
+      }
+    } else {
+      btn.disabled = false;
+      if (duetIAmReady) {
+        hint.textContent = 'waiting for partner…';
+      } else {
+        hint.textContent = `photo ${duetShotsTaken + 1} of 4 — press when ready`;
+      }
+    }
+  }
+
+  function checkBothReady() {
+    if (duetIAmReady && duetPartnerReady && !duetIsCapturing) {
+      document.getElementById('duetBoothHint').textContent = 'both ready — smile!';
+      document.getElementById('duetShootBtn').disabled = true;
+      // Only host runs the actual countdown & fires
+      if (duetRole === 'host') {
+        setTimeout(() => runDuetCountdown(), 400);
+      }
+    }
+  }
+
+  // ─── Press ready (toggle) ────────────────────────────────────
+  function duetPressReady() {
+    if (duetIsCapturing) return;
+
+    if (!duetIAmReady) {
+      // Signal ready
+      duetIAmReady = true;
+      setPip('duetMyReadyPip', true);
+      socket.emit('ready', duetRoom);
+      document.getElementById('duetShootBtn').disabled = true;
+      document.getElementById('duetBoothHint').textContent = 'waiting for partner…';
+      checkBothReady();
+    }
+    // Note: no un-ready toggle after pressing — keeps flow clean
+  }
+
+  // ─── Countdown (host runs, broadcasts ticks) ─────────────────
+  function runDuetCountdown() {
+    duetIsCapturing = true;
+    let count = 3;
+    const numEl = document.getElementById('duetCountdownNum');
+    document.getElementById('duetBoothHint').textContent = `photo ${duetShotsTaken + 1} of 4 — smile!`;
+
+    function tick() {
+      numEl.classList.remove('show');
+      setTimeout(() => {
+        numEl.textContent = count;
+        numEl.classList.add('show');
+        // Broadcast tick to guest
+        socket.emit('countdown', { code: duetRoom, n: count });
+
+        if (count === 0) {
+          setTimeout(() => {
+            // Host captures its own frame
+            duetSnapFrame();
+            // Tell guest to snap too
+            socket.emit('fire', duetRoom);
+          }, 400);
+        } else {
+          count--;
+          setTimeout(tick, 900);
+        }
+      }, 80);
+    }
+
+    // Also show countdown on host side immediately (guest gets it via broadcast)
+    tick();
+  }
+
+  // ─── Snap a single frame (called on both sides) ──────────────
+  function duetSnapFrame() {
+    const video  = document.getElementById('duetVideo');
+    const canvas = document.getElementById('captureCanvas');
+
+    const vw = video.videoWidth  || 640;
+    const vh = video.videoHeight || 480;
+    const TARGET_RATIO = 4 / 3;
+    const videoRatio   = vw / vh;
+
+    let srcX, srcY, srcW, srcH;
+    if (videoRatio > TARGET_RATIO) {
+      srcH = vh; srcW = vh * TARGET_RATIO;
+      srcX = (vw - srcW) / 2; srcY = 0;
+    } else {
+      srcW = vw; srcH = vw / TARGET_RATIO;
+      srcX = 0; srcY = (vh - srcH) / 2;
+    }
+
+    const W = Math.round(srcW), H = Math.round(srcH);
+    canvas.width = W; canvas.height = H;
+
+    const ctx = canvas.getContext('2d');
+    ctx.save(); ctx.translate(W, 0); ctx.scale(-1, 1);
+    ctx.drawImage(video, srcX, srcY, srcW, srcH, 0, 0, W, H);
+    ctx.restore();
+
+    applyFilterToCanvas(ctx, W, H);
+    drawHeartsOnCanvas(ctx, W, H);
+
+    const dataURL  = canvas.toDataURL('image/jpeg', 0.88);
+    const shotIdx  = duetShotsTaken;
+    duetMyImages[shotIdx] = dataURL;
+
+    // Flash local viewfinder
+    const flash = document.getElementById('duetFlashOverlay');
+    flash.style.opacity = '1';
+    setTimeout(() => flash.style.opacity = '0', 80);
+
+    // Fill dot
+    document.getElementById(`duet-dot-${shotIdx}`).classList.add('filled');
+
+    // Thumbnail: host always left, guest always right — so both screens match
+    const myThumbId   = duetRole === 'guest' ? `duet-rthumb-${shotIdx}` : `duet-lthumb-${shotIdx}`;
+    const lslot = document.getElementById(myThumbId);
+    lslot.classList.remove('empty');
+    lslot.innerHTML = `<img src="${dataURL}">`;
+
+    // Send photo to partner via server
+    socket.emit('photo', { code: duetRoom, shot: shotIdx, data: dataURL });
+
+    // Hide countdown number
+    document.getElementById('duetCountdownNum').classList.remove('show');
+
+    duetShotsTaken++;
+
+    if (duetShotsTaken >= 4) {
+      document.getElementById('duetBoothHint').textContent = 'developing your strip…';
+      document.getElementById('duetShootBtn').disabled = true;
+      duetIsCapturing = false;
+      stopFrameStreaming();
+      checkDuetComplete();
+    } else {
+      // Reset ready state for next shot
+      duetIsCapturing = false;
+      duetIAmReady = false;
+      duetPartnerReady = false;
+      setPip('duetMyReadyPip', false);
+      setPip('duetPartnerReadyPip', false);
+      setTimeout(() => {
+        document.getElementById('duetShootBtn').disabled = false;
+        document.getElementById('duetBoothHint').textContent = `photo ${duetShotsTaken + 1} of 4 — press when ready`;
+      }, 700);
+    }
+  }
+
+  function stopFrameStreaming() {
+    if (duetFrameInterval) { clearInterval(duetFrameInterval); duetFrameInterval = null; }
+  }
+
+  // ─── Check if both sides have all 4 photos ───────────────────
+  function checkDuetComplete() {
+    const myDone = duetMyImages.filter(Boolean).length >= 4;
+    const partnerDone = duetPartnerImages.filter(Boolean).length >= 4;
+
+    if (myDone && partnerDone) {
+      setTimeout(() => {
+        if (duetStream) { duetStream.getTracks().forEach(t => t.stop()); duetStream = null; }
+        buildDuetStrip();
+      }, 600);
+    }
+  }
+
+  // ─── Build the duet strip ────────────────────────────────────
+  function buildDuetStrip() {
+    const leftEl  = document.getElementById('duetStripLeft');
+    const rightEl = document.getElementById('duetStripRight');
+    leftEl.innerHTML = '';
+    rightEl.innerHTML = '';
+
+    // Host always on the left, guest always on the right — same on both screens
+    const leftImages  = duetRole === 'guest' ? duetPartnerImages : duetMyImages;
+    const rightImages = duetRole === 'guest' ? duetMyImages      : duetPartnerImages;
+
+    for (let i = 0; i < 4; i++) {
+      const li = document.createElement('img');
+      li.src = leftImages[i] || '';
+      li.style.cssText = 'width:118px;height:88px;object-fit:cover;display:block;';
+      leftEl.appendChild(li);
+
+      const ri = document.createElement('img');
+      ri.src = rightImages[i] || '';
+      ri.style.cssText = 'width:118px;height:88px;object-fit:cover;display:block;';
+      rightEl.appendChild(ri);
+    }
+
+    const theme = STRIP_THEMES[duetFilter] || STRIP_THEMES.none;
+    const container = document.getElementById('duetStripContainer');
+    container.style.background = theme.bg;
+    container.style.borderColor = theme.edge;
+
+    document.getElementById('duetStripDate').textContent =
+      new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+
+    // Labels match the fixed layout
+    document.getElementById('duetStripName1').textContent = duetRole === 'guest' ? 'partner' : 'you';
+    document.getElementById('duetStripName2').textContent = duetRole === 'guest' ? 'you'     : 'partner';
+
+    goTo('screen-duet-strip');
+  }
+
+  // ─── Download duet strip ─────────────────────────────────────
+  function downloadDuetStrip() {
+    const canvas = document.getElementById('captureCanvas');
+    const PHOTO_W = 240, PHOTO_H = 180;
+    const GAP = 4, PAD_X = 20, PAD_TOP = 36, PAD_BOTTOM = 70;
+    const DIVIDER = 4;
+    const W = (PHOTO_W * 2) + DIVIDER + (PAD_X * 2);
+    const H = PAD_TOP + (PHOTO_H * 4) + (GAP * 3) + PAD_BOTTOM;
+
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    const theme = STRIP_THEMES[duetFilter] || STRIP_THEMES.none;
+
+    ctx.fillStyle = theme.bg;
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = theme.edge;
+    ctx.fillRect(0, 0, W, 8);
+    ctx.fillRect(0, H - 8, W, 8);
+
+    // Divider
+    ctx.fillStyle = 'rgba(139,111,92,0.2)';
+    ctx.fillRect(PAD_X + PHOTO_W + 1, PAD_TOP - 4, DIVIDER - 2, PHOTO_H * 4 + GAP * 3 + 8);
+
+    // Name labels — host always left, guest always right
+    const leftLabel  = duetRole === 'guest' ? 'PARTNER' : 'YOU';
+    const rightLabel = duetRole === 'guest' ? 'YOU'     : 'PARTNER';
+    ctx.fillStyle = theme.footer;
+    ctx.font = '8px "Space Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(leftLabel,  PAD_X + PHOTO_W / 2,                    PAD_TOP - 10);
+    ctx.fillText(rightLabel, PAD_X + PHOTO_W + DIVIDER + PHOTO_W / 2, PAD_TOP - 10);
+
+    const leftImages  = duetRole === 'guest' ? duetPartnerImages : duetMyImages;
+    const rightImages = duetRole === 'guest' ? duetMyImages      : duetPartnerImages;
+    let loaded = 0;
+    const total = (leftImages.filter(Boolean).length + rightImages.filter(Boolean).length);
+
+    function onLoad() {
+      loaded++;
+      if (loaded >= total) drawDuetFooter(ctx, W, H, theme);
+    }
+
+    for (let i = 0; i < 4; i++) {
+      const y = PAD_TOP + i * (PHOTO_H + GAP);
+      if (leftImages[i]) {
+        const img = new Image();
+        img.onload = () => {
+          ctx.save(); ctx.beginPath(); ctx.rect(PAD_X, y, PHOTO_W, PHOTO_H); ctx.clip();
+          drawImageCover(ctx, img, PAD_X, y, PHOTO_W, PHOTO_H);
+          ctx.restore();
+          ctx.strokeStyle = theme.frame; ctx.lineWidth = 1;
+          ctx.strokeRect(PAD_X, y, PHOTO_W, PHOTO_H);
+          onLoad();
+        };
+        img.src = leftImages[i];
+      }
+      if (rightImages[i]) {
+        const img2 = new Image();
+        const xR = PAD_X + PHOTO_W + DIVIDER;
+        img2.onload = () => {
+          ctx.save(); ctx.beginPath(); ctx.rect(xR, y, PHOTO_W, PHOTO_H); ctx.clip();
+          drawImageCover(ctx, img2, xR, y, PHOTO_W, PHOTO_H);
+          ctx.restore();
+          ctx.strokeStyle = theme.frame; ctx.lineWidth = 1;
+          ctx.strokeRect(xR, y, PHOTO_W, PHOTO_H);
+          onLoad();
+        };
+        img2.src = rightImages[i];
+      }
+    }
+  }
+
+  function drawDuetFooter(ctx, W, H, theme) {
+    const PAD_BOTTOM = 70;
+    ctx.fillStyle = theme.footer;
+    ctx.font = 'italic 15px "Playfair Display", Georgia, serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('the candid archive · duet', W / 2, H - PAD_BOTTOM + 22);
+
+    const dateStr = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }).toUpperCase();
+    ctx.font = '9px "Space Mono", monospace';
+    ctx.fillStyle = theme.date;
+    ctx.fillText(dateStr, W / 2, H - PAD_BOTTOM + 40);
+
+    const link = document.createElement('a');
+    link.download = `duet-candid-archive-${Date.now()}.png`;
+    link.href = document.getElementById('captureCanvas').toDataURL('image/png');
+    link.click();
+  }
+
+  // ─── Exit duet booth ─────────────────────────────────────────
+  function exitDuetBooth() {
+    stopFrameStreaming();
+    if (duetStream) { duetStream.getTracks().forEach(t => t.stop()); duetStream = null; }
+    duetShotsTaken = 0; duetMyImages = []; duetPartnerImages = [];
+    duetIsCapturing = false; duetIAmReady = false; duetPartnerReady = false;
+    setPip('duetMyReadyPip', false); setPip('duetPartnerReadyPip', false);
+    goTo('screen-duet-lobby');
+  }
+
+  function leaveDuet() {
+    stopFrameStreaming();
+    if (duetStream) { duetStream.getTracks().forEach(t => t.stop()); duetStream = null; }
+    if (socket) { socket.disconnect(); socket = null; }
+
+    // Reset lobby UI
+    document.getElementById('duetOptions').style.display = 'flex';
+    document.getElementById('duetRoomCard').classList.remove('visible');
+    document.getElementById('duetJoinWrap').classList.remove('visible');
+    document.getElementById('duetFilterSection').style.display = 'none';
+    document.getElementById('duetJoinInput').value = '';
+    document.getElementById('duetJoinInput').disabled = false;
+    document.querySelectorAll('#duetFilterGrid .filter-card').forEach(c => {
+      c.style.pointerEvents = ''; c.style.opacity = '';
+    });
+    document.getElementById('duetStartBtn').style.display = '';
+
+    duetRole = null; duetFilter = 'none'; duetRoom = null;
+    duetShotsTaken = 0; duetMyImages = []; duetPartnerImages = [];
+    setDuetStatus('choose an option to begin', '');
+
+    goTo('screen-landing');
+  }
+</script>
+</body>
+</html>
